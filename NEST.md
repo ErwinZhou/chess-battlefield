@@ -64,15 +64,15 @@ Setup for your development environment should be relatively simple:
  1. Install one of our target C++ compilers:
  	- Linux: g++
 	- MacOS: clang++ (from XCode). From the terminal: `xcode-select --install`
-	- Windows: Visual Studio Community 2022 (or just the build tools). From the terminal: `winget install Microsoft.VisualStudio.2022.Community` (or `Microsoft.VisualStudio.2022.BuildTools`)
+	- Windows: Visual Studio Community 2026 (or just the build tools). From the terminal: `winget install Microsoft.VisualStudio.Community` (or `Microsoft.VisualStudio.BuildTools`)
  2. Install [node](https://node.js):
     - Linux: e.g. `sudo apt-get install node`
 	- MacOS: e.g. `brew install node`
 	- Windows: e.g. `winget install OpenJS.NodeJS`
  3. Extract an appropriate [release of nest-libs](https://github.com/15-466/nest-libs/releases) to a sibling of this folder:
-	- Linux: https://github.com/15-466/nest-libs/releases/download/v0.14/nest-libs-linux-v0.14.tar.gz
-	- MacOS: https://github.com/15-466/nest-libs/releases/download/v0.14/nest-libs-macos-v0.14.tar.gz
-	- Windows: https://github.com/15-466/nest-libs/releases/download/v0.14/nest-libs-windows-v0.14.zip
+	- Linux: https://github.com/15-466/nest-libs/releases/download/v0.15/nest-libs-linux-v0.15.tar.gz
+	- MacOS: https://github.com/15-466/nest-libs/releases/download/v0.15/nest-libs-macos-v0.15.tar.gz
+	- Windows: https://github.com/15-466/nest-libs/releases/download/v0.15/nest-libs-windows-v0.15.zip
 
 Once you are finished, your directory tree should looks something like this:
 
@@ -109,7 +109,7 @@ Here are a few worthwhile variations:
   $ node Maekfile.js -v
 ```
 
-*Windows Note:* you will need to use a command prompt with the visual studio tools and variables configured. The "x64 Native Tools Command Prompt for VS2022" start menu option provides this option.
+*Windows Note:* you will need to use a command prompt with the visual studio tools and variables configured. The "x64 Native Tools Command Prompt for VS2026" start menu option provides this option.
 
 ## A Word About Github Actions
 

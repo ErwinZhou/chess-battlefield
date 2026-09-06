@@ -65,7 +65,7 @@ int main(int argc, char **argv) {
 
 	//create window:
 	Mode::window = SDL_CreateWindow(
-		"gp25 game5: multiplayer", //TODO: remember to set a title for your game!
+		"gp25 game6: multiplayer", //TODO: remember to set a title for your game!
 		1280, 720, //TODO: modify window size if you'd like
 		SDL_WINDOW_OPENGL
 		| SDL_WINDOW_RESIZABLE //uncomment to allow resizing
@@ -140,6 +140,10 @@ int main(int argc, char **argv) {
 		{ //(1) process any events that are pending
 			static SDL_Event evt;
 			while (SDL_PollEvent(&evt)) {
+				//ignore key repeat:
+				if (evt.type == SDL_EVENT_KEY_DOWN && evt.key.repeat) {
+					continue;
+				}
 				//handle resizing:
 				if (evt.type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED) {
 					on_resize();
