@@ -26,3 +26,11 @@ scenes/show-meshes*
 scenes/show-scene*
 scenes/SDL3.dll
 *.blend[0-9]
+
+# copied piece images
+dist/pawn.png
+dist/knight.png
+dist/bishop.png
+dist/rook.png
+dist/queen.png
+dist/king.png

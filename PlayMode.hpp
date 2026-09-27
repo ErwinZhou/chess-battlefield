@@ -2,11 +2,13 @@
 
 #include "Connection.hpp"
 #include "Game.hpp"
+#include "GL.hpp"
 
 #include <glm/glm.hpp>
 
 #include <vector>
 #include <deque>
+#include <map>
 
 struct PlayMode : Mode {
 	PlayMode(Client &client);
@@ -30,5 +32,10 @@ struct PlayMode : Mode {
 
 	//connection to server:
 	Client &client;
+
+	// each piece keeps its own PNG texture
+	std::map<std::string, GLuint> piece_textures;
+	GLuint piece_vao = 0;
+	GLuint piece_vbo = 0;
 
 };
