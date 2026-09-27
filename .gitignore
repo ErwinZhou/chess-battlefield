@@ -1,4 +1,5 @@
 objs/
+dist/chess.sprites
 maek-cache.json
 dist/README-SDL.txt
 dist/README-glm.txt

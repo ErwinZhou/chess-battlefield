@@ -1,6 +1,7 @@
 #include "PlayMode.hpp"
 
-#include "DrawLines.hpp"
+#include "ColorTextureProgram.hpp"
+#include "load_save_png.hpp"
 #include "gl_errors.hpp"
 #include "data_path.hpp"
 #include "hex_dump.hpp"
@@ -9,13 +10,46 @@
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtx/string_cast.hpp>
 
-#include <random>
-#include <array>
+#include <algorithm>
 
 PlayMode::PlayMode(Client &client_) : client(client_) {
+	// read each PNG separately and upload its colors to its own texture
+	for (auto name : {"pawn", "knight", "bishop", "rook", "queen", "king"}) {
+		glm::uvec2 size;
+		std::vector<glm::u8vec4> pixels;
+		load_png(data_path(std::string(name) + ".png"), &size, &pixels, LowerLeftOrigin);
+		GLuint texture;
+		glGenTextures(1, &texture);
+		glBindTexture(GL_TEXTURE_2D, texture);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, size.x, size.y, 0,
+			GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		piece_textures[name] = texture;
+	}
+	glBindTexture(GL_TEXTURE_2D, 0);
+
+	// each vertex contains screen position x/y followed by image coordinates u/v
+	glGenVertexArrays(1, &piece_vao);
+	glGenBuffers(1, &piece_vbo);
+	glBindVertexArray(piece_vao);
+	glBindBuffer(GL_ARRAY_BUFFER, piece_vbo);
+	auto const &shader = *color_texture_program;
+	glVertexAttribPointer(shader.Position_vec4, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), nullptr);
+	glEnableVertexAttribArray(shader.Position_vec4);
+	glVertexAttribPointer(shader.TexCoord_vec2, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float),
+		reinterpret_cast<void *>(2 * sizeof(float)));
+	glEnableVertexAttribArray(shader.TexCoord_vec2);
+	glBindVertexArray(0);
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
 }
 
 PlayMode::~PlayMode() {
+	for (auto const &piece : piece_textures) glDeleteTextures(1, &piece.second);
+	glDeleteBuffers(1, &piece_vbo);
+	glDeleteVertexArrays(1, &piece_vao);
 }
 
 bool PlayMode::handle_event(SDL_Event const &evt, glm::uvec2 const &window_size) {
@@ -103,81 +137,67 @@ void PlayMode::update(float elapsed) {
 }
 
 void PlayMode::draw(glm::uvec2 const &drawable_size) {
-
-	static std::array< glm::vec2, 16 > const circle = [](){
-		std::array< glm::vec2, 16 > ret;
-		for (uint32_t a = 0; a < ret.size(); ++a) {
-			float ang = a / float(ret.size()) * 2.0f * float(M_PI);
-			ret[a] = glm::vec2(std::cos(ang), std::sin(ang));
-		}
-		return ret;
-	}();
-
-	glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
-	glClear(GL_COLOR_BUFFER_BIT);
+	if (drawable_size.x == 0 || drawable_size.y == 0) return;
 	glDisable(GL_DEPTH_TEST);
-	
-	//figure out view transform to center the arena:
-	float aspect = float(drawable_size.x) / float(drawable_size.y);
-	float scale = std::min(
-		2.0f * aspect / (Game::ArenaMax.x - Game::ArenaMin.x + 2.0f * Game::PlayerRadius),
-		2.0f / (Game::ArenaMax.y - Game::ArenaMin.y + 2.0f * Game::PlayerRadius)
-	);
-	glm::vec2 offset = -0.5f * (Game::ArenaMax + Game::ArenaMin);
+	glDisable(GL_SCISSOR_TEST);
+	glClearColor(0.07f, 0.08f, 0.10f, 1.0f);
+	glClear(GL_COLOR_BUFFER_BIT);
 
-	glm::mat4 world_to_clip = glm::mat4(
-		scale / aspect, 0.0f, 0.0f, offset.x,
-		0.0f, scale, 0.0f, offset.y,
-		0.0f, 0.0f, 1.0f, 0.0f,
-		0.0f, 0.0f, 0.0f, 1.0f
-	);
-
-	{
-		DrawLines lines(world_to_clip);
-
-		//helper:
-		auto draw_text = [&](glm::vec2 const &at, std::string const &text, float H) {
-			lines.draw_text(text,
-				glm::vec3(at.x, at.y, 0.0),
-				glm::vec3(H, 0.0f, 0.0f), glm::vec3(0.0f, H, 0.0f),
-				glm::u8vec4(0x00, 0x00, 0x00, 0x00));
-			float ofs = (1.0f / scale) / drawable_size.y;
-			lines.draw_text(text,
-				glm::vec3(at.x + ofs, at.y + ofs, 0.0),
-				glm::vec3(H, 0.0f, 0.0f), glm::vec3(0.0f, H, 0.0f),
-				glm::u8vec4(0xff, 0xff, 0xff, 0x00));
-		};
-
-		lines.draw(glm::vec3(Game::ArenaMin.x, Game::ArenaMin.y, 0.0f), glm::vec3(Game::ArenaMax.x, Game::ArenaMin.y, 0.0f), glm::u8vec4(0xff, 0x00, 0xff, 0xff));
-		lines.draw(glm::vec3(Game::ArenaMin.x, Game::ArenaMax.y, 0.0f), glm::vec3(Game::ArenaMax.x, Game::ArenaMax.y, 0.0f), glm::u8vec4(0xff, 0x00, 0xff, 0xff));
-		lines.draw(glm::vec3(Game::ArenaMin.x, Game::ArenaMin.y, 0.0f), glm::vec3(Game::ArenaMin.x, Game::ArenaMax.y, 0.0f), glm::u8vec4(0xff, 0x00, 0xff, 0xff));
-		lines.draw(glm::vec3(Game::ArenaMax.x, Game::ArenaMin.y, 0.0f), glm::vec3(Game::ArenaMax.x, Game::ArenaMax.y, 0.0f), glm::u8vec4(0xff, 0x00, 0xff, 0xff));
-
-		for (auto const &player : game.players) {
-			glm::u8vec4 col = glm::u8vec4(player.color.x*255, player.color.y*255, player.color.z*255, 0xff);
-			if (&player == &game.players.front()) {
-				//mark current player (which server sends first):
-				lines.draw(
-					glm::vec3(player.position + Game::PlayerRadius * glm::vec2(-0.5f,-0.5f), 0.0f),
-					glm::vec3(player.position + Game::PlayerRadius * glm::vec2( 0.5f, 0.5f), 0.0f),
-					col
-				);
-				lines.draw(
-					glm::vec3(player.position + Game::PlayerRadius * glm::vec2(-0.5f, 0.5f), 0.0f),
-					glm::vec3(player.position + Game::PlayerRadius * glm::vec2( 0.5f,-0.5f), 0.0f),
-					col
-				);
-			}
-			for (uint32_t a = 0; a < circle.size(); ++a) {
-				lines.draw(
-					glm::vec3(player.position + Game::PlayerRadius * circle[a], 0.0f),
-					glm::vec3(player.position + Game::PlayerRadius * circle[(a+1)%circle.size()], 0.0f),
-					col
-				);
-			}
-
-			draw_text(player.position + glm::vec2(0.0f, -0.1f + Game::PlayerRadius), player.name, 0.09f);
+	// keep an 8x8 board square and centered when the window is resized
+	int cell = std::max(1, int(std::min(drawable_size.x, drawable_size.y)) / 10);
+	int side = cell * 8;
+	int left = (int(drawable_size.x) - side) / 2;
+	int bottom = (int(drawable_size.y) - side) / 2;
+	glEnable(GL_SCISSOR_TEST);
+	for (int row = 0; row < 8; ++row) {
+		for (int col = 0; col < 8; ++col) {
+			glScissor(left + col * cell, bottom + row * cell, cell, cell);
+			if ((row + col) % 2 == 0) glClearColor(0.20f, 0.29f, 0.26f, 1.0f);
+			else glClearColor(0.72f, 0.76f, 0.64f, 1.0f);
+			glClear(GL_COLOR_BUFFER_BIT);
 		}
 	}
+	glDisable(GL_SCISSOR_TEST);
+
+	// these are actual board positions with row 0 at the bottom and col 0 at the left
+	// change only row and col below to move a preview piece to another square
+	struct Placement { char const *image; int row, col; };
+	static Placement const pieces[] = {
+		{"pawn", 1, 3}, {"knight", 0, 1}, {"bishop", 2, 2},
+		{"rook", 0, 7}, {"queen", 3, 4}, {"king", 6, 4},
+	};
+
+	glViewport(left, bottom, side, side);
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	auto const &shader = *color_texture_program;
+	glUseProgram(shader.program);
+	glm::mat4 identity(1.0f);
+	glUniformMatrix4fv(shader.CLIP_FROM_OBJECT_mat4, 1, GL_FALSE, glm::value_ptr(identity));
+	glActiveTexture(GL_TEXTURE0);
+	glBindVertexArray(piece_vao);
+	glBindBuffer(GL_ARRAY_BUFFER, piece_vbo);
+	glVertexAttrib4f(shader.Color_vec4, 1.0f, 1.0f, 1.0f, 1.0f);
+	for (auto const &piece : pieces) {
+		// convert board coordinates to OpenGL's -1 to +1 range with a small margin
+		float x0 = (piece.col + 0.1f) / 4.0f - 1.0f;
+		float y0 = (piece.row + 0.1f) / 4.0f - 1.0f;
+		float x1 = (piece.col + 0.9f) / 4.0f - 1.0f;
+		float y1 = (piece.row + 0.9f) / 4.0f - 1.0f;
+		// u/v always cover the entire individual PNG from 0 to 1
+		float vertices[] = {
+			x0, y0, 0, 0,  x1, y0, 1, 0,  x0, y1, 0, 1,
+			x0, y1, 0, 1,  x1, y0, 1, 0,  x1, y1, 1, 1,
+		};
+		glBindTexture(GL_TEXTURE_2D, piece_textures.at(piece.image));
+		glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STREAM_DRAW);
+		glDrawArrays(GL_TRIANGLES, 0, 6);
+	}
+	glBindVertexArray(0);
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
+	glBindTexture(GL_TEXTURE_2D, 0);
+	glUseProgram(0);
+	glDisable(GL_BLEND);
+	glViewport(0, 0, drawable_size.x, drawable_size.y);
 	GL_ERRORS();
 }
