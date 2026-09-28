@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdint>
 #include <list>
+#include <optional>
 
 namespace chess {
 enum class Pieces : uint8_t { Pawn = 0, Knight, Bishop, Rook, Queen, King };
@@ -19,6 +20,7 @@ struct Player {
     Pieces piece = Pieces::Pawn;
     PlayerStatus status = PlayerStatus::Waiting;
     Position pos;
+    float cooldown = 0.0f;
 };
 struct King {
     Team team = Team::A;
@@ -34,6 +36,10 @@ struct ChessLogic {
     ChessLogic();
     static bool in_bounds(Position pos);
     bool occupied(Position pos) const;
+    std::optional<Team> team_at(Position pos) const;
+    bool legal_move(Pieces piece, Team team, Position from, Position to) const;
+    bool move_player(uint32_t id, Position destination);
+    static constexpr float MoveCooldown = 1.0f;
     Team choose_team() const;
     bool try_spawn(Player &player);
     Player *spawn_player();

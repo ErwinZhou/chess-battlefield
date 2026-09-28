@@ -1,6 +1,8 @@
 #include "ChessLogic.hpp"
 
 #include <limits>
+#include <algorithm>
+#include <cmath>
 #include <stdexcept>
 
 namespace chess {
@@ -10,11 +12,54 @@ bool ChessLogic::in_bounds(Position pos) {
     return pos.row >= 0 && pos.row < 8 && pos.col >= 0 && pos.col < 8;
 }
 
-bool ChessLogic::occupied(Position pos) const {
+std::optional<Team> ChessLogic::team_at(Position pos) const {
     auto same = [pos](Position other) { return pos.row == other.row && pos.col == other.col; };
-    for (auto const &king : kings) if (same(king.pos)) return true;
+    for (auto const &king : kings) if (same(king.pos)) return king.team;
     for (auto const &player : players)
-        if (player.status == PlayerStatus::Alive && same(player.pos)) return true;
+        if (player.status == PlayerStatus::Alive && same(player.pos)) return player.team;
+    return std::nullopt;
+}
+
+bool ChessLogic::occupied(Position pos) const { return team_at(pos).has_value(); }
+
+bool ChessLogic::legal_move(Pieces piece, Team team, Position from, Position to) const {
+    if (!in_bounds(from) || !in_bounds(to)) return false;
+    int dr = to.row - from.row, dc = to.col - from.col;
+    int ar = std::abs(dr), ac = std::abs(dc);
+    if (ar == 0 && ac == 0) return false;
+    auto target = team_at(to);
+    if (target && *target == team) return false;
+    switch (piece) {
+        case Pieces::Pawn: {
+            int forward = team == Team::A ? 1 : -1;
+            return dr == forward && ((dc == 0 && !target) || (ac == 1 && target));
+        }
+        case Pieces::Knight: return (ar == 2 && ac == 1) || (ar == 1 && ac == 2);
+        case Pieces::King: return std::max(ar, ac) == 1;
+        case Pieces::Rook: if (dr != 0 && dc != 0) return false; break;
+        case Pieces::Bishop: if (ar != ac) return false; break;
+        case Pieces::Queen: if (dr != 0 && dc != 0 && ar != ac) return false; break;
+        default: return false;
+    }
+    int sr = (dr > 0) - (dr < 0), sc = (dc > 0) - (dc < 0);
+    for (Position p{from.row + sr, from.col + sc}; p.row != to.row || p.col != to.col;
+         p.row += sr, p.col += sc) {
+        if (occupied(p)) return false;
+    }
+    return true;
+}
+
+bool ChessLogic::move_player(uint32_t id, Position destination) {
+    for (auto &player : players) {
+        if (player.id != id) continue;
+        if (player.status != PlayerStatus::Alive || player.cooldown > 0.0f) return false;
+        if (!legal_move(player.piece, player.team, player.pos, destination)) return false;
+        // Capture settlement and respawning belong to Stage 3.
+        if (occupied(destination)) return false;
+        player.pos = destination;
+        player.cooldown = MoveCooldown;
+        return true;
+    }
     return false;
 }
 
@@ -31,6 +76,7 @@ bool ChessLogic::try_spawn(Player &player) {
         if (occupied({row, col})) continue;
         player.pos = {row, col};
         player.status = PlayerStatus::Alive;
+        player.cooldown = MoveCooldown;
         return true;
     }
     player.pos = {-1, -1};
@@ -56,7 +102,11 @@ void ChessLogic::remove_player(Player *player) {
     }
 }
 
-void ChessLogic::update(float) {
-    for (auto &player : players) try_spawn(player);
+void ChessLogic::update(float elapsed) {
+    if (!std::isfinite(elapsed) || elapsed < 0.0f) return;
+    for (auto &player : players) {
+        player.cooldown = std::max(0.0f, player.cooldown - elapsed);
+        try_spawn(player);
+    }
 }
 } // namespace chess
