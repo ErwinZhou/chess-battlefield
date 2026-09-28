@@ -21,8 +21,8 @@ struct PlayMode : Mode {
 
 	//----- game state -----
 
-	//input tracking for local player:
-	Player::Controls controls;
+	// Set only after a complete authoritative snapshot.
+	bool has_snapshot = false;
 
 	//latest game state (from server):
 	Game game;

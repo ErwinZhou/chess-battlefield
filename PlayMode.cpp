@@ -52,66 +52,11 @@ PlayMode::~PlayMode() {
 	glDeleteVertexArrays(1, &piece_vao);
 }
 
-bool PlayMode::handle_event(SDL_Event const &evt, glm::uvec2 const &window_size) {
-
-	if (evt.type == SDL_EVENT_KEY_DOWN) {
-		if (evt.key.repeat) {
-			//ignore repeats
-		} else if (evt.key.key == SDLK_A) {
-			controls.left.downs += 1;
-			controls.left.pressed = true;
-			return true;
-		} else if (evt.key.key == SDLK_D) {
-			controls.right.downs += 1;
-			controls.right.pressed = true;
-			return true;
-		} else if (evt.key.key == SDLK_W) {
-			controls.up.downs += 1;
-			controls.up.pressed = true;
-			return true;
-		} else if (evt.key.key == SDLK_S) {
-			controls.down.downs += 1;
-			controls.down.pressed = true;
-			return true;
-		} else if (evt.key.key == SDLK_SPACE) {
-			controls.jump.downs += 1;
-			controls.jump.pressed = true;
-			return true;
-		}
-	} else if (evt.type == SDL_EVENT_KEY_UP) {
-		if (evt.key.key == SDLK_A) {
-			controls.left.pressed = false;
-			return true;
-		} else if (evt.key.key == SDLK_D) {
-			controls.right.pressed = false;
-			return true;
-		} else if (evt.key.key == SDLK_W) {
-			controls.up.pressed = false;
-			return true;
-		} else if (evt.key.key == SDLK_S) {
-			controls.down.pressed = false;
-			return true;
-		} else if (evt.key.key == SDLK_SPACE) {
-			controls.jump.pressed = false;
-			return true;
-		}
-	}
-
-	return false;
+bool PlayMode::handle_event(SDL_Event const &, glm::uvec2 const &) {
+    return false;
 }
 
-void PlayMode::update(float elapsed) {
-
-	//queue data for sending to server:
-	controls.send_controls_message(&client.connection);
-
-	//reset button press counters:
-	controls.left.downs = 0;
-	controls.right.downs = 0;
-	controls.up.downs = 0;
-	controls.down.downs = 0;
-	controls.jump.downs = 0;
-
+void PlayMode::update(float) {
 	//send/receive data:
 	client.poll([this](Connection *c, Connection::Event event){
 		if (event == Connection::OnOpen) {
@@ -125,7 +70,12 @@ void PlayMode::update(float elapsed) {
 			try {
 				do {
 					handled_message = false;
-					if (game.recv_state_message(c)) handled_message = true;
+					if (!c->recv_buffer.empty() && c->recv_buffer.front() != uint8_t(Message::S2C_State))
+                        throw std::runtime_error("Unknown server message");
+                    if (game.recv_state_message(c)) {
+                        handled_message = true;
+                        has_snapshot = true;
+                    }
 				} while (handled_message);
 			} catch (std::exception const &e) {
 				std::cerr << "[" << c->socket << "] malformed message from server: " << e.what() << std::endl;
@@ -134,6 +84,17 @@ void PlayMode::update(float elapsed) {
 			}
 		}
 	}, 0.0);
+    std::string title = "Chess — connecting";
+    if (has_snapshot) for (auto const &player : game.logic.players) {
+        if (player.id != game.local_player_id) continue;
+        title = "Chess — Player " + std::to_string(player.id)
+              + (player.team == chess::Team::A ? " — Team A (blue)" : " — Team B (orange)")
+              + (player.status == chess::PlayerStatus::Waiting ? " — Waiting for a free home square" : " — Your piece: yellow outline");
+    }
+    if (title != server_message) {
+        SDL_SetWindowTitle(Mode::window, title.c_str());
+        server_message = title;
+    }
 }
 
 void PlayMode::draw(glm::uvec2 const &drawable_size) {
@@ -159,13 +120,31 @@ void PlayMode::draw(glm::uvec2 const &drawable_size) {
 	}
 	glDisable(GL_SCISSOR_TEST);
 
-	// these are actual board positions with row 0 at the bottom and col 0 at the left
-	// change only row and col below to move a preview piece to another square
-	struct Placement { char const *image; int row, col; };
-	static Placement const pieces[] = {
-		{"pawn", 1, 3}, {"knight", 0, 1}, {"bishop", 2, 2},
-		{"rook", 0, 7}, {"queen", 3, 4}, {"king", 6, 4},
-	};
+    if (!has_snapshot) return;
+    auto marker = [&](chess::Position pos, chess::Team team, bool local) {
+        int x = left + pos.col * cell, y = bottom + pos.row * cell;
+        int width = std::max(1, cell / 20);
+        glEnable(GL_SCISSOR_TEST);
+        auto rect = [&](int rx, int ry, int w, int h) {
+            glScissor(rx, ry, w, h);
+            glClear(GL_COLOR_BUFFER_BIT);
+        };
+        if (team == chess::Team::A) glClearColor(0.1f, 0.45f, 1.0f, 1.0f);
+        else glClearColor(1.0f, 0.35f, 0.05f, 1.0f);
+        rect(x, y, cell, std::max(1, cell / 10));
+        if (local) {
+            glClearColor(1.0f, 0.9f, 0.05f, 1.0f);
+            rect(x, y, width, cell);
+            rect(x + cell - width, y, width, cell);
+            rect(x, y, cell, width);
+            rect(x, y + cell - width, cell, width);
+        }
+        glDisable(GL_SCISSOR_TEST);
+    };
+    for (auto const &king : game.logic.kings) marker(king.pos, king.team, false);
+    for (auto const &player : game.logic.players)
+        if (player.status == chess::PlayerStatus::Alive)
+            marker(player.pos, player.team, player.id == game.local_player_id);
 
 	glViewport(left, bottom, side, side);
 	glEnable(GL_BLEND);
@@ -178,21 +157,34 @@ void PlayMode::draw(glm::uvec2 const &drawable_size) {
 	glBindVertexArray(piece_vao);
 	glBindBuffer(GL_ARRAY_BUFFER, piece_vbo);
 	glVertexAttrib4f(shader.Color_vec4, 1.0f, 1.0f, 1.0f, 1.0f);
-	for (auto const &piece : pieces) {
+	auto draw_piece = [&](chess::Pieces type, chess::Position pos) {
+        char const *name = nullptr;
+        switch (type) {
+            case chess::Pieces::Pawn: name = "pawn"; break;
+            case chess::Pieces::Knight: name = "knight"; break;
+            case chess::Pieces::Bishop: name = "bishop"; break;
+            case chess::Pieces::Rook: name = "rook"; break;
+            case chess::Pieces::Queen: name = "queen"; break;
+            case chess::Pieces::King: name = "king"; break;
+            default: throw std::runtime_error("Invalid piece type");
+        }
 		// convert board coordinates to OpenGL's -1 to +1 range with a small margin
-		float x0 = (piece.col + 0.1f) / 4.0f - 1.0f;
-		float y0 = (piece.row + 0.1f) / 4.0f - 1.0f;
-		float x1 = (piece.col + 0.9f) / 4.0f - 1.0f;
-		float y1 = (piece.row + 0.9f) / 4.0f - 1.0f;
+		float x0 = (pos.col + 0.1f) / 4.0f - 1.0f;
+		float y0 = (pos.row + 0.1f) / 4.0f - 1.0f;
+		float x1 = (pos.col + 0.9f) / 4.0f - 1.0f;
+		float y1 = (pos.row + 0.9f) / 4.0f - 1.0f;
 		// u/v always cover the entire individual PNG from 0 to 1
 		float vertices[] = {
 			x0, y0, 0, 0,  x1, y0, 1, 0,  x0, y1, 0, 1,
 			x0, y1, 0, 1,  x1, y0, 1, 0,  x1, y1, 1, 1,
 		};
-		glBindTexture(GL_TEXTURE_2D, piece_textures.at(piece.image));
+		glBindTexture(GL_TEXTURE_2D, piece_textures.at(name));
 		glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STREAM_DRAW);
 		glDrawArrays(GL_TRIANGLES, 0, 6);
-	}
+    };
+    for (auto const &king : game.logic.kings) draw_piece(chess::Pieces::King, king.pos);
+    for (auto const &player : game.logic.players)
+        if (player.status == chess::PlayerStatus::Alive) draw_piece(player.piece, player.pos);
 	glBindVertexArray(0);
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
 	glBindTexture(GL_TEXTURE_2D, 0);

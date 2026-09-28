@@ -44,7 +44,7 @@ int main(int argc, char **argv) {
 	//------------ main loop ------------
 
 	//keep track of which connection is controlling which player:
-	std::unordered_map< Connection *, Player * > connection_to_player;
+	std::unordered_map< Connection *, chess::Player * > connection_to_player;
 	//keep track of game state:
 	Game game;
 
@@ -62,7 +62,7 @@ int main(int argc, char **argv) {
 			//helper used on client close (due to quit) and server close (due to error):
 			auto remove_connection = [&](Connection *c) {
 				auto f = connection_to_player.find(c);
-				assert(f != connection_to_player.end());
+				if (f == connection_to_player.end()) return;
 				game.remove_player(f->second);
 				connection_to_player.erase(f);
 			};
@@ -80,27 +80,9 @@ int main(int argc, char **argv) {
 					remove_connection(c);
 
 				} else { assert(evt == Connection::OnRecv);
-					//got data from client:
-					//std::cout << "current buffer:\n" << hex_dump(c->recv_buffer); std::cout.flush(); //DEBUG
-
-					//look up in players list:
-					auto f = connection_to_player.find(c);
-					assert(f != connection_to_player.end());
-					Player &player = *f->second;
-
-					//handle messages from client:
-					try {
-						bool handled_message;
-						do {
-							handled_message = false;
-							if (player.controls.recv_controls_message(c)) handled_message = true;
-							//TODO: extend for more message types as needed
-						} while (handled_message);
-					} catch (std::exception const &e) {
-						std::cout << "Disconnecting client:" << e.what() << std::endl;
-						c->close();
-						remove_connection(c);
-					}
+                    // Stage 1 has no client gameplay messages.
+                    c->close();
+                    remove_connection(c);
 				}
 			}, remain);
 		}
