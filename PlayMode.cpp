@@ -1,4 +1,5 @@
 #include "PlayMode.hpp"
+#include "BoardLayout.hpp"
 
 #include "ColorTextureProgram.hpp"
 #include "load_save_png.hpp"
@@ -52,8 +53,17 @@ PlayMode::~PlayMode() {
 	glDeleteVertexArrays(1, &piece_vao);
 }
 
-bool PlayMode::handle_event(SDL_Event const &, glm::uvec2 const &) {
-    return false;
+bool PlayMode::handle_event(SDL_Event const &event, glm::uvec2 const &window_size) {
+    if (event.type != SDL_EVENT_MOUSE_BUTTON_DOWN || event.button.button != SDL_BUTTON_LEFT) return false;
+    if (!has_snapshot) return true;
+    auto local = std::find_if(game.logic.players.begin(), game.logic.players.end(),
+        [&](auto const &p) { return p.id == game.local_player_id; });
+    if (local == game.logic.players.end() || local->status != chess::PlayerStatus::Alive || local->cooldown > 0) return true;
+    int width, height;
+    SDL_GetWindowSizeInPixels(Mode::window, &width, &height);
+    auto destination = BoardLayout::hit(event.button.x, event.button.y, window_size.x, window_size.y, width, height);
+    if (destination) Game::send_move_message(&client.connection, *destination);
+    return true;
 }
 
 void PlayMode::update(float) {
@@ -89,7 +99,7 @@ void PlayMode::update(float) {
         if (player.id != game.local_player_id) continue;
         title = "Chess — Player " + std::to_string(player.id)
               + (player.team == chess::Team::A ? " — Team A (blue)" : " — Team B (orange)")
-              + (player.status == chess::PlayerStatus::Waiting ? " — Waiting for a free home square" : " — Your piece: yellow outline");
+              + (player.status == chess::PlayerStatus::Waiting ? " — Waiting for a free home square" : (player.cooldown > 0 ? " — Cooling down" : " — Ready: click a destination"));
     }
     if (title != server_message) {
         SDL_SetWindowTitle(Mode::window, title.c_str());
@@ -105,10 +115,8 @@ void PlayMode::draw(glm::uvec2 const &drawable_size) {
 	glClear(GL_COLOR_BUFFER_BIT);
 
 	// keep an 8x8 board square and centered when the window is resized
-	int cell = std::max(1, int(std::min(drawable_size.x, drawable_size.y)) / 10);
-	int side = cell * 8;
-	int left = (int(drawable_size.x) - side) / 2;
-	int bottom = (int(drawable_size.y) - side) / 2;
+    auto board = BoardLayout::fit(drawable_size.x, drawable_size.y);
+    int cell = board.cell, side = board.side, left = board.left, bottom = board.bottom;
 	glEnable(GL_SCISSOR_TEST);
 	for (int row = 0; row < 8; ++row) {
 		for (int col = 0; col < 8; ++col) {
@@ -145,6 +153,23 @@ void PlayMode::draw(glm::uvec2 const &drawable_size) {
     for (auto const &player : game.logic.players)
         if (player.status == chess::PlayerStatus::Alive)
             marker(player.pos, player.team, player.id == game.local_player_id);
+
+    // Small bar below the board: green means ready, amber drains with cooldown.
+    for (auto const &player : game.logic.players) {
+        if (player.id != game.local_player_id || player.status != chess::PlayerStatus::Alive) continue;
+        int height = std::max(2, cell / 10);
+        int y = std::max(0, bottom - height * 2);
+        glEnable(GL_SCISSOR_TEST);
+        glScissor(left, y, side, height);
+        glClearColor(0.15f, 0.17f, 0.20f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT);
+        bool ready = player.cooldown <= 0;
+        glScissor(left, y, ready ? side : int(side * player.cooldown / chess::ChessLogic::MoveCooldown), height);
+        if (ready) glClearColor(0.15f, 0.85f, 0.4f, 1.0f);
+        else glClearColor(1.0f, 0.6f, 0.1f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT);
+        glDisable(GL_SCISSOR_TEST);
+    }
 
 	glViewport(left, bottom, side, side);
 	glEnable(GL_BLEND);

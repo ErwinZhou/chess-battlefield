@@ -47,6 +47,12 @@ int main(int argc, char **argv) {
 	std::unordered_map< Connection *, chess::Player * > connection_to_player;
 	//keep track of game state:
 	Game game;
+    auto last_update = std::chrono::steady_clock::now();
+    auto advance_logic = [&]() {
+        auto now = std::chrono::steady_clock::now();
+        game.update(std::chrono::duration<float>(now - last_update).count());
+        last_update = now;
+    };
 
 	while (true) {
 		static auto next_tick = std::chrono::steady_clock::now() + std::chrono::duration< double >(Game::Tick);
@@ -68,6 +74,7 @@ int main(int argc, char **argv) {
 			};
 
 			server.poll([&](Connection *c, Connection::Event evt){
+				advance_logic();
 				if (evt == Connection::OnOpen) {
 					//client connected:
 
@@ -80,15 +87,21 @@ int main(int argc, char **argv) {
 					remove_connection(c);
 
 				} else { assert(evt == Connection::OnRecv);
-                    // Stage 1 has no client gameplay messages.
-                    c->close();
-                    remove_connection(c);
+                    auto found = connection_to_player.find(c);
+                    if (found == connection_to_player.end()) return;
+                    try {
+                        while (game.recv_move_message(c, found->second->id)) {}
+                    } catch (std::exception const &e) {
+                        std::cerr << "Disconnecting client: " << e.what() << std::endl;
+                        c->close();
+                        remove_connection(c);
+                    }
 				}
 			}, remain);
 		}
 
 		//update current game state
-		game.update(Game::Tick);
+		advance_logic();
 
 		//send updated game state to all clients
 		for (auto &[c, player] : connection_to_player) {
