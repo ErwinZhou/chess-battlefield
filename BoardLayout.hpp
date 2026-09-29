@@ -8,6 +8,14 @@
 struct BoardLayout {
     int cell, side, left, bottom;
     int panel_left, panel_width;
+    static constexpr float TextLineSpacing = 1.65f;
+    float text_size(int height) const {
+        return std::min(float(panel_width) / 12.0f, float(height) / 24.0f);
+    }
+    float menu_baseline(int row, int height) const {
+        // Team/type/points, gap, winner/countdown, then the menu heading.
+        return float(bottom + side) - text_size(height) * (2.0f + (6 + row) * TextLineSpacing);
+    }
     static BoardLayout fit(int width, int height) {
         // Reserve the right side for readable status; hit testing uses this same rectangle.
         int board_region = width * 69 / 100;

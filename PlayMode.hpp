@@ -7,7 +7,6 @@
 #include <glm/glm.hpp>
 
 #include <vector>
-#include <deque>
 #include <map>
 
 struct PlayMode : Mode {

@@ -7,11 +7,8 @@
 #include "load_save_png.hpp"
 #include "gl_errors.hpp"
 #include "data_path.hpp"
-#include "hex_dump.hpp"
 
 #include <glm/gtc/type_ptr.hpp>
-#define GLM_ENABLE_EXPERIMENTAL
-#include <glm/gtx/string_cast.hpp>
 
 #include <algorithm>
 
@@ -73,13 +70,12 @@ bool PlayMode::handle_event(SDL_Event const &event, glm::uvec2 const &window_siz
             if (event.key.key == SDLK_0) choice = 5;
         } else if (window_size.x && window_size.y) {
             auto layout = BoardLayout::fit(width,height);
-            float size = std::min(float(layout.panel_width)/12.0f, float(height)/24.0f);
+            float size = layout.text_size(height);
             float x = event.button.x * width / window_size.x;
             float y = height - event.button.y * height / window_size.y;
-            float first = float(layout.bottom+layout.side) - size*11.9f;
             if (x >= layout.panel_left && x < layout.panel_left+layout.panel_width)
                 for (int i=0; i<6; ++i) {
-                    float baseline = first - i*size*1.65f;
+                    float baseline = layout.menu_baseline(i,height);
                     if (y >= baseline-size*.25f && y < baseline+size*1.2f) choice=i;
                 }
         }
@@ -122,7 +118,7 @@ void PlayMode::update(float) {
 			} catch (std::exception const &e) {
 				std::cerr << "[" << c->socket << "] malformed message from server: " << e.what() << std::endl;
 				//quit the game:
-				throw e;
+				throw;
 			}
 		}
 	}, 0.0);
@@ -261,7 +257,7 @@ void PlayMode::draw(glm::uvec2 const &drawable_size) {
     // Right-side status panel. Text scales with drawable size, including high DPI.
     {
         float w = float(drawable_size.x), h = float(drawable_size.y);
-        float size = std::min(float(board.panel_width) / 12.0f, h / 24.0f);
+        float size = board.text_size(drawable_size.y);
         float x = float(board.panel_left);
         float y = float(bottom + side) - size;
         glm::mat4 pixels(1.0f);
@@ -272,7 +268,7 @@ void PlayMode::draw(glm::uvec2 const &drawable_size) {
                         glm::u8vec4 color = glm::u8vec4(255)) {
             float font = size * scale;
             text.draw_text(label, {x,y,0}, {font,0,0}, {0,font,0}, color);
-            y -= font * 1.65f;
+            y -= font * BoardLayout::TextLineSpacing;
         };
         for (auto const &player : game.logic.players) {
             if (player.id != game.local_player_id) continue;
