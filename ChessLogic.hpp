@@ -19,7 +19,7 @@ struct Position {
 struct Player {
     uint32_t id = 0;
     Team team = Team::A;
-    Pieces piece = Pieces::Pawn;
+    Pieces piece = Pieces::Knight; // free starting piece; players can travel in every direction
     PlayerStatus status = PlayerStatus::Waiting;
     Position pos;
     float cooldown = 0.0f;
