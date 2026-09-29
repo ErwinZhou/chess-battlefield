@@ -14,7 +14,7 @@ void Game::send_state_message(Connection *connection, chess::Player const *recip
         for (unsigned i = 0; i < bytes; ++i) connection->send(uint8_t(value >> (8 * i)));
     };
     write(uint8_t(Message::S2C_State), 1);
-    write(24 + 21 * uint32_t(logic.players.size()), 3);
+    write(26 + 21 * uint32_t(logic.players.size()), 3);
     write(recipient ? recipient->id : 0, 4);
     write(uint32_t(logic.players.size()), 2);
     for (auto const &player : logic.players) {
@@ -39,6 +39,8 @@ void Game::send_state_message(Connection *connection, chess::Player const *recip
     write(logic.capturer_id, 4);
     write(uint32_t(std::ceil(logic.break_remaining * 1000.0f)), 2);
     write(logic.round_number, 4);
+    write(logic.selection_open ? 1 : 0, 1);
+    write(logic.selected_piece ? uint8_t(*logic.selected_piece) : 255, 1);
 }
 
 bool Game::recv_state_message(Connection *connection) {
@@ -46,7 +48,7 @@ bool Game::recv_state_message(Connection *connection) {
     if (buffer.size() < 4) return false;
     if (buffer[0] != uint8_t(Message::S2C_State)) return false;
     uint32_t size = uint32_t(buffer[1]) | (uint32_t(buffer[2]) << 8) | (uint32_t(buffer[3]) << 16);
-    if (size < 24 || size > 24 + 21 * uint32_t(std::numeric_limits<uint16_t>::max()) || (size - 24) % 21)
+    if (size < 26 || size > 26 + 21 * uint32_t(std::numeric_limits<uint16_t>::max()) || (size - 26) % 21)
         throw std::runtime_error("Invalid snapshot size");
     if (buffer.size() < 4 + size) return false;
     size_t at = 4;
@@ -58,7 +60,7 @@ bool Game::recv_state_message(Connection *connection) {
     };
     uint32_t recipient = read(4);
     uint32_t count = read(2);
-    if (size != 24 + 21 * count) throw std::runtime_error("Snapshot count/size mismatch");
+    if (size != 26 + 21 * count) throw std::runtime_error("Snapshot count/size mismatch");
     std::list<chess::Player> players;
     std::array<chess::King, 2> kings;
     std::unordered_set<uint32_t> ids;
@@ -126,6 +128,11 @@ bool Game::recv_state_message(Connection *connection) {
             if (player.id == capturer && uint8_t(player.team) != winner)
                 throw std::runtime_error("Invalid capturer team");
     }
+    auto selection_open = read(1), selected_piece = read(1);
+    if (selection_open > 1 || (selected_piece >= uint8_t(chess::Pieces::King) && selected_piece != 255) ||
+        (selection_open && selected_piece != 255) ||
+        ((selection_open || selected_piece != 255) && (phase != uint8_t(chess::RoundPhase::Break) || !capturer || !ids.count(capturer))))
+        throw std::runtime_error("Invalid selection state");
     if (recipient && !ids.count(recipient)) throw std::runtime_error("Missing local player");
     // Commit only a fully validated frame. Never apply this on the live server.
     logic.players = std::move(players);
@@ -136,6 +143,8 @@ bool Game::recv_state_message(Connection *connection) {
     logic.capturer_id = capturer;
     logic.break_remaining = float(break_ms) / 1000.0f;
     logic.round_number = round;
+    logic.selection_open = selection_open != 0;
+    logic.selected_piece = selected_piece == 255 ? std::nullopt : std::optional<chess::Pieces>(chess::Pieces(selected_piece));
     buffer.erase(buffer.begin(), buffer.begin() + 4 + size);
     return true;
 }
@@ -164,4 +173,24 @@ bool Game::recv_move_message(Connection *connection, uint32_t player_id) {
     }
     buffer.erase(buffer.begin(), buffer.begin() + 10);
     return true; // consumed, even when the move is illegal
+}
+
+void Game::send_selection_message(Connection *connection, uint32_t round, chess::Pieces piece) {
+    for (uint8_t byte : {uint8_t(Message::C2S_Select), uint8_t(5), uint8_t(0), uint8_t(0)}) connection->send(byte);
+    for (unsigned i=0; i<4; ++i) connection->send(uint8_t(round >> (8*i)));
+    connection->send(uint8_t(piece));
+}
+
+bool Game::recv_client_message(Connection *connection, uint32_t player_id) {
+    auto &buffer = connection->recv_buffer;
+    if (buffer.empty()) return false;
+    if (buffer[0] != uint8_t(Message::C2S_Select)) return recv_move_message(connection, player_id);
+    if (buffer.size() < 4) return false;
+    if (buffer[1] != 5 || buffer[2] || buffer[3]) throw std::runtime_error("Invalid selection size");
+    if (buffer.size() < 9) return false;
+    uint32_t round = 0;
+    for (unsigned i=0; i<4; ++i) round |= uint32_t(buffer[4+i]) << (8*i);
+    logic.select_piece(player_id, round, chess::Pieces(buffer[8]));
+    buffer.erase(buffer.begin(), buffer.begin()+9);
+    return true;
 }
