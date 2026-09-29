@@ -21,6 +21,9 @@ struct Player {
     PlayerStatus status = PlayerStatus::Waiting;
     Position pos;
     float cooldown = 0.0f;
+    uint32_t points = 0;
+    float respawn_remaining = 0.0f;
+    uint32_t life = 0; // changes on capture and spawn to invalidate stale requests
 };
 struct King {
     Team team = Team::A;
@@ -40,6 +43,8 @@ struct ChessLogic {
     bool legal_move(Pieces piece, Team team, Position from, Position to) const;
     bool move_player(uint32_t id, Position destination);
     static constexpr float MoveCooldown = 1.0f;
+    static constexpr float RespawnDelay = 3.0f;
+    static uint32_t capture_value(Pieces piece);
     Team choose_team() const;
     bool try_spawn(Player &player);
     Player *spawn_player();

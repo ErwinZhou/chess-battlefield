@@ -54,13 +54,35 @@ bool ChessLogic::move_player(uint32_t id, Position destination) {
         if (player.id != id) continue;
         if (player.status != PlayerStatus::Alive || player.cooldown > 0.0f) return false;
         if (!legal_move(player.piece, player.team, player.pos, destination)) return false;
-        // Capture settlement and respawning belong to Stage 3.
-        if (occupied(destination)) return false;
+        // King capture and round transitions belong to Stage 4.
+        for (auto const &king : kings)
+            if (king.pos.row == destination.row && king.pos.col == destination.col) return false;
+        for (auto &victim : players) {
+            if (victim.status != PlayerStatus::Alive || victim.pos.row != destination.row || victim.pos.col != destination.col) continue;
+            uint32_t reward = capture_value(victim.piece);
+            player.points += std::min(reward, std::numeric_limits<uint32_t>::max() - player.points);
+            victim.status = PlayerStatus::Dead;
+            victim.pos = {-1, -1};
+            victim.cooldown = 0.0f;
+            victim.respawn_remaining = RespawnDelay;
+            ++victim.life;
+            break;
+        }
         player.pos = destination;
         player.cooldown = MoveCooldown;
         return true;
     }
     return false;
+}
+
+uint32_t ChessLogic::capture_value(Pieces piece) {
+    switch (piece) {
+        case Pieces::Pawn: return 1;
+        case Pieces::Knight: case Pieces::Bishop: return 3;
+        case Pieces::Rook: case Pieces::King: return 5;
+        case Pieces::Queen: return 9;
+    }
+    return 0;
 }
 
 Team ChessLogic::choose_team() const {
@@ -76,6 +98,7 @@ bool ChessLogic::try_spawn(Player &player) {
         if (occupied({row, col})) continue;
         player.pos = {row, col};
         player.status = PlayerStatus::Alive;
+        ++player.life;
         player.cooldown = MoveCooldown;
         return true;
     }
@@ -106,6 +129,10 @@ void ChessLogic::update(float elapsed) {
     if (!std::isfinite(elapsed) || elapsed < 0.0f) return;
     for (auto &player : players) {
         player.cooldown = std::max(0.0f, player.cooldown - elapsed);
+        if (player.status == PlayerStatus::Dead) {
+            player.respawn_remaining = std::max(0.0f, player.respawn_remaining - elapsed);
+            if (player.respawn_remaining == 0.0f) player.status = PlayerStatus::Waiting;
+        }
         try_spawn(player);
     }
 }
