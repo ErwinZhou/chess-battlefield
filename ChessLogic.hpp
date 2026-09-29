@@ -41,6 +41,8 @@ struct ChessLogic {
     uint32_t next_player_id = 1;
     RoundPhase phase = RoundPhase::Playing;
     std::optional<Team> winner;
+    bool selection_open = false;
+    std::optional<Pieces> selected_piece; // applied at next round
     uint32_t capturer_id = 0; // 0 when an AI king wins the round
     float break_remaining = 0.0f;
     uint32_t round_number = 1;
@@ -63,6 +65,7 @@ struct ChessLogic {
     void update(float elapsed); // timers only; server runs kings after player requests
     void update_kings();
     void reset_round();
+    bool select_piece(uint32_t player_id, uint32_t round, Pieces piece);
 private:
     void capture_player(Player &victim);
     void finish_round(Team team, uint32_t capturer);

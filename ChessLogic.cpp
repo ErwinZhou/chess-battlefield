@@ -125,7 +125,10 @@ Player *ChessLogic::spawn_player() {
 
 void ChessLogic::remove_player(Player *player) {
     for (auto it = players.begin(); it != players.end(); ++it) {
-        if (&*it == player) { players.erase(it); return; }
+        if (&*it == player) {
+            if (player->id == capturer_id) { selection_open = false; selected_piece.reset(); }
+            players.erase(it); return;
+        }
     }
 }
 
@@ -159,12 +162,33 @@ void ChessLogic::finish_round(Team team, uint32_t capturer) {
     phase = RoundPhase::Break;
     winner = team;
     capturer_id = capturer;
+    selection_open = capturer != 0;
+    selected_piece.reset();
     break_remaining = RoundBreak;
     // Reject commands already in flight from this board, even after the break.
     for (auto &player : players) ++player.life;
 }
 
+bool ChessLogic::select_piece(uint32_t player_id, uint32_t round, Pieces piece) {
+    if (phase != RoundPhase::Break || !selection_open || round != round_number ||
+        player_id != capturer_id || uint8_t(piece) >= uint8_t(Pieces::King)) return false;
+    for (auto &player : players) {
+        if (player.id != player_id) continue;
+        uint32_t cost = piece == player.piece ? 0 : capture_value(piece);
+        if (player.points < cost) return false;
+        player.points -= cost;
+        selected_piece = piece;
+        selection_open = false;
+        return true;
+    }
+    return false;
+}
+
 void ChessLogic::reset_round() {
+    if (selected_piece) for (auto &player : players)
+        if (player.id == capturer_id) player.piece = *selected_piece;
+    selection_open = false;
+    selected_piece.reset();
     phase = RoundPhase::Playing;
     winner.reset();
     capturer_id = 0;
