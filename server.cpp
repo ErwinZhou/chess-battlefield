@@ -90,7 +90,7 @@ int main(int argc, char **argv) {
                     auto found = connection_to_player.find(c);
                     if (found == connection_to_player.end()) return;
                     try {
-                        while (game.recv_move_message(c, found->second->id)) {}
+                        while (game.recv_client_message(c, found->second->id)) {}
                     } catch (std::exception const &e) {
                         std::cerr << "Disconnecting client: " << e.what() << std::endl;
                         c->close();

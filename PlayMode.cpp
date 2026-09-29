@@ -56,13 +56,43 @@ PlayMode::~PlayMode() {
 }
 
 bool PlayMode::handle_event(SDL_Event const &event, glm::uvec2 const &window_size) {
-    if (event.type != SDL_EVENT_MOUSE_BUTTON_DOWN || event.button.button != SDL_BUTTON_LEFT) return false;
-    if (!has_snapshot || game.logic.phase != chess::RoundPhase::Playing) return true;
+    bool click = event.type == SDL_EVENT_MOUSE_BUTTON_DOWN && event.button.button == SDL_BUTTON_LEFT;
+    bool key = event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat;
+    if (!click && !key) return false;
+    if (!has_snapshot) return click;
     auto local = std::find_if(game.logic.players.begin(), game.logic.players.end(),
         [&](auto const &p) { return p.id == game.local_player_id; });
-    if (local == game.logic.players.end() || local->status != chess::PlayerStatus::Alive || local->cooldown > 0) return true;
+    if (local == game.logic.players.end()) return click;
     int width, height;
     SDL_GetWindowSizeInPixels(Mode::window, &width, &height);
+    if (game.logic.phase == chess::RoundPhase::Break) {
+        if (!game.logic.selection_open || game.logic.capturer_id != local->id) return click;
+        int choice = -1;
+        if (key) {
+            if (event.key.key >= SDLK_1 && event.key.key <= SDLK_5) choice = int(event.key.key - SDLK_1);
+            if (event.key.key == SDLK_0) choice = 5;
+        } else if (window_size.x && window_size.y) {
+            auto layout = BoardLayout::fit(width,height);
+            float size = std::min(float(layout.panel_width)/12.0f, float(height)/24.0f);
+            float x = event.button.x * width / window_size.x;
+            float y = height - event.button.y * height / window_size.y;
+            float first = float(layout.bottom+layout.side) - size*11.9f;
+            if (x >= layout.panel_left && x < layout.panel_left+layout.panel_width)
+                for (int i=0; i<6; ++i) {
+                    float baseline = first - i*size*1.65f;
+                    if (y >= baseline-size*.25f && y < baseline+size*1.2f) choice=i;
+                }
+        }
+        if (choice >= 0) {
+            auto type = choice == 5 ? local->piece : chess::Pieces(choice);
+            if (type == local->piece || local->points >= chess::ChessLogic::capture_value(type))
+                Game::send_selection_message(&client.connection, game.logic.round_number, type);
+            return true;
+        }
+        return click;
+    }
+    if (!click) return false;
+    if (local->status != chess::PlayerStatus::Alive || local->cooldown > 0) return true;
     auto destination = BoardLayout::hit(event.button.x, event.button.y, window_size.x, window_size.y, width, height);
     if (destination) Game::send_move_message(&client.connection, *destination, local->life);
     return true;
@@ -255,6 +285,21 @@ void PlayMode::draw(glm::uvec2 const &drawable_size) {
             if (game.logic.phase == chess::RoundPhase::Break) {
                 line(*game.logic.winner == chess::Team::A ? "Team A wins!" : "Team B wins!");
                 line("Next round in " + std::to_string(int(std::ceil(game.logic.break_remaining))));
+                if (game.logic.capturer_id == player.id) {
+                    if (game.logic.selection_open) {
+                        line("Choose piece");
+                        for (int i=0; i<5; ++i) {
+                            auto type = chess::Pieces(i);
+                            bool current = type == player.piece;
+                            uint32_t cost = current ? 0 : chess::ChessLogic::capture_value(type);
+                            std::string label = std::to_string(i+1) + " " + names[i] + (current ? " (keep)" : " -" + std::to_string(cost));
+                            line(label, 1.0f, player.points >= cost ? glm::u8vec4(255) : glm::u8vec4(125,125,125,255));
+                        }
+                        line("0 Keep - free");
+                    } else if (game.logic.selected_piece) {
+                        line(std::string("Next: ") + names[uint8_t(*game.logic.selected_piece)]);
+                    }
+                }
             } else if (player.status == chess::PlayerStatus::Dead) {
                 line("Captured");
                 line("Respawn in " + std::to_string(int(std::ceil(player.respawn_remaining))));
