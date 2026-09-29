@@ -153,7 +153,7 @@ const client_names = [
 	maek.CPP('client.cpp'),
 	maek.CPP('PlayMode.cpp'),
 	maek.CPP('LitColorTextureProgram.cpp'),
-	//maek.CPP('ColorTextureProgram.cpp'),  //not used right now, but you might want it
+	maek.CPP('ColorTextureProgram.cpp'),
 	maek.CPP('Sound.cpp'),
 	maek.CPP('load_wav.cpp'),
 	maek.CPP('load_opus.cpp')
@@ -165,6 +165,7 @@ const server_names = [
 
 const common_names = [
 	maek.CPP('Game.cpp'),
+	maek.CPP('ChessLogic.cpp'),
 	maek.CPP('data_path.cpp'),
 	maek.CPP('PathFont.cpp'),
 	maek.CPP('PathFont-font.cpp'),
@@ -201,6 +202,15 @@ const client_exe = maek.LINK([...client_names, ...common_names], 'dist/client');
 const server_exe = maek.LINK([...server_names, ...common_names], 'dist/server');
 const show_meshes_exe = maek.LINK([...show_meshes_names, ...common_names], 'scenes/show-meshes');
 const show_scene_exe = maek.LINK([...show_scene_names, ...common_names], 'scenes/show-scene');
+
+// copy each PNG directly into the client data directory
+const piece_assets = ['pawn', 'knight', 'bishop', 'rook', 'queen', 'king']
+	.map(name => maek.COPY(`assets/${name}.png`, `dist/${name}.png`));
+const assets_target = async () => {};
+assets_target.depends = piece_assets;
+assets_target.label = 'ASSETS :assets';
+maek.tasks[':assets'] = assets_target;
+maek.tasks[client_exe].depends.push(...piece_assets);
 
 //set the default target to the game (and copy the readme files):
 maek.TARGETS = [client_exe, server_exe, show_meshes_exe, show_scene_exe, ...copies];

@@ -47,7 +47,10 @@ int main(int argc, char **argv) {
 	//------------  initialization ------------
 
 	//Initialize SDL library:
-	SDL_Init(SDL_INIT_VIDEO);
+	if (!SDL_Init(SDL_INIT_VIDEO)) {
+        std::cerr << "Error initializing SDL: " << SDL_GetError() << std::endl;
+        return 1;
+    }
 
 	//Ask for an OpenGL context version 3.3, core profile, enable debug:
 	SDL_GL_ResetAttributes();
@@ -65,20 +68,20 @@ int main(int argc, char **argv) {
 
 	//create window:
 	Mode::window = SDL_CreateWindow(
-		"gp25 game6: multiplayer", //TODO: remember to set a title for your game!
-		1280, 720, //TODO: modify window size if you'd like
+		"Multiplayer Chess",
+		1280, 720,
 		SDL_WINDOW_OPENGL
 		| SDL_WINDOW_RESIZABLE //uncomment to allow resizing
 		| SDL_WINDOW_HIGH_PIXEL_DENSITY //uncomment for full resolution on high-DPI screens
 	);
 
-	//prevent exceedingly tiny windows when resizing:
-	SDL_SetWindowMinimumSize(Mode::window,100,100);
-
 	if (!Mode::window) {
 		std::cerr << "Error creating SDL window: " << SDL_GetError() << std::endl;
 		return 1;
 	}
+
+    // Keep the board and purchase menu readable.
+    SDL_SetWindowMinimumSize(Mode::window, 640, 480);
 
 	//Create OpenGL context:
 	SDL_GLContext context = SDL_GL_CreateContext(Mode::window);
