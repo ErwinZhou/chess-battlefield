@@ -7,7 +7,6 @@
 #include <glm/glm.hpp>
 
 #include <vector>
-#include <deque>
 #include <map>
 
 struct PlayMode : Mode {
@@ -21,14 +20,15 @@ struct PlayMode : Mode {
 
 	//----- game state -----
 
-	//input tracking for local player:
-	Player::Controls controls;
+	// Set only after a complete authoritative snapshot.
+	bool has_snapshot = false;
 
 	//latest game state (from server):
 	Game game;
 
 	//last message from server:
 	std::string server_message;
+    std::string hud_info, hud_status;
 
 	//connection to server:
 	Client &client;

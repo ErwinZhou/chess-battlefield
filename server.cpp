@@ -1,7 +1,6 @@
 
 #include "Connection.hpp"
 
-#include "hex_dump.hpp"
 
 #include "Game.hpp"
 
@@ -44,9 +43,15 @@ int main(int argc, char **argv) {
 	//------------ main loop ------------
 
 	//keep track of which connection is controlling which player:
-	std::unordered_map< Connection *, Player * > connection_to_player;
+	std::unordered_map< Connection *, chess::Player * > connection_to_player;
 	//keep track of game state:
 	Game game;
+    auto last_update = std::chrono::steady_clock::now();
+    auto advance_logic = [&]() {
+        auto now = std::chrono::steady_clock::now();
+        game.update(std::chrono::duration<float>(now - last_update).count());
+        last_update = now;
+    };
 
 	while (true) {
 		static auto next_tick = std::chrono::steady_clock::now() + std::chrono::duration< double >(Game::Tick);
@@ -62,17 +67,23 @@ int main(int argc, char **argv) {
 			//helper used on client close (due to quit) and server close (due to error):
 			auto remove_connection = [&](Connection *c) {
 				auto f = connection_to_player.find(c);
-				assert(f != connection_to_player.end());
+				if (f == connection_to_player.end()) return;
 				game.remove_player(f->second);
 				connection_to_player.erase(f);
 			};
 
 			server.poll([&](Connection *c, Connection::Event evt){
+				advance_logic();
 				if (evt == Connection::OnOpen) {
 					//client connected:
 
 					//create some player info for them:
-					connection_to_player.emplace(c, game.spawn_player());
+					try {
+                        connection_to_player.emplace(c, game.spawn_player());
+                    } catch (std::exception const &e) {
+                        std::cerr << "Cannot join: " << e.what() << std::endl;
+                        c->close();
+                    }
 
 				} else if (evt == Connection::OnClose) {
 					//client disconnected:
@@ -80,33 +91,24 @@ int main(int argc, char **argv) {
 					remove_connection(c);
 
 				} else { assert(evt == Connection::OnRecv);
-					//got data from client:
-					//std::cout << "current buffer:\n" << hex_dump(c->recv_buffer); std::cout.flush(); //DEBUG
-
-					//look up in players list:
-					auto f = connection_to_player.find(c);
-					assert(f != connection_to_player.end());
-					Player &player = *f->second;
-
-					//handle messages from client:
-					try {
-						bool handled_message;
-						do {
-							handled_message = false;
-							if (player.controls.recv_controls_message(c)) handled_message = true;
-							//TODO: extend for more message types as needed
-						} while (handled_message);
-					} catch (std::exception const &e) {
-						std::cout << "Disconnecting client:" << e.what() << std::endl;
-						c->close();
-						remove_connection(c);
-					}
+                    auto found = connection_to_player.find(c);
+                    if (found == connection_to_player.end()) return;
+                    try {
+                        while (game.recv_client_message(c, found->second->id)) {}
+                    } catch (std::exception const &e) {
+                        std::cerr << "Disconnecting client: " << e.what() << std::endl;
+                        c->close();
+                        remove_connection(c);
+                    }
 				}
 			}, remain);
 		}
 
 		//update current game state
-		game.update(Game::Tick);
+		advance_logic();
+
+		// AI actions run after this tick's player requests.
+        game.logic.update_kings();
 
 		//send updated game state to all clients
 		for (auto &[c, player] : connection_to_player) {
