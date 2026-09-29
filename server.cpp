@@ -1,7 +1,6 @@
 
 #include "Connection.hpp"
 
-#include "hex_dump.hpp"
 
 #include "Game.hpp"
 
@@ -79,7 +78,12 @@ int main(int argc, char **argv) {
 					//client connected:
 
 					//create some player info for them:
-					connection_to_player.emplace(c, game.spawn_player());
+					try {
+                        connection_to_player.emplace(c, game.spawn_player());
+                    } catch (std::exception const &e) {
+                        std::cerr << "Cannot join: " << e.what() << std::endl;
+                        c->close();
+                    }
 
 				} else if (evt == Connection::OnClose) {
 					//client disconnected:
