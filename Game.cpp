@@ -14,7 +14,7 @@ void Game::send_state_message(Connection *connection, chess::Player const *recip
         for (unsigned i = 0; i < bytes; ++i) connection->send(uint8_t(value >> (8 * i)));
     };
     write(uint8_t(Message::S2C_State), 1);
-    write(10 + 21 * uint32_t(logic.players.size()), 3);
+    write(24 + 21 * uint32_t(logic.players.size()), 3);
     write(recipient ? recipient->id : 0, 4);
     write(uint32_t(logic.players.size()), 2);
     for (auto const &player : logic.players) {
@@ -32,7 +32,13 @@ void Game::send_state_message(Connection *connection, chess::Player const *recip
     for (auto const &king : logic.kings) {
         write(uint8_t(king.pos.row), 1);
         write(uint8_t(king.pos.col), 1);
+        write(king.alive ? 1 : 0, 1);
     }
+    write(uint8_t(logic.phase), 1);
+    write(logic.winner ? uint8_t(*logic.winner) : 255, 1);
+    write(logic.capturer_id, 4);
+    write(uint32_t(std::ceil(logic.break_remaining * 1000.0f)), 2);
+    write(logic.round_number, 4);
 }
 
 bool Game::recv_state_message(Connection *connection) {
@@ -40,7 +46,7 @@ bool Game::recv_state_message(Connection *connection) {
     if (buffer.size() < 4) return false;
     if (buffer[0] != uint8_t(Message::S2C_State)) return false;
     uint32_t size = uint32_t(buffer[1]) | (uint32_t(buffer[2]) << 8) | (uint32_t(buffer[3]) << 16);
-    if (size < 10 || size > 10 + 21 * uint32_t(std::numeric_limits<uint16_t>::max()) || (size - 10) % 21)
+    if (size < 24 || size > 24 + 21 * uint32_t(std::numeric_limits<uint16_t>::max()) || (size - 24) % 21)
         throw std::runtime_error("Invalid snapshot size");
     if (buffer.size() < 4 + size) return false;
     size_t at = 4;
@@ -52,7 +58,7 @@ bool Game::recv_state_message(Connection *connection) {
     };
     uint32_t recipient = read(4);
     uint32_t count = read(2);
-    if (size != 10 + 21 * count) throw std::runtime_error("Snapshot count/size mismatch");
+    if (size != 24 + 21 * count) throw std::runtime_error("Snapshot count/size mismatch");
     std::list<chess::Player> players;
     std::array<chess::King, 2> kings;
     std::unordered_set<uint32_t> ids;
@@ -95,14 +101,41 @@ bool Game::recv_state_message(Connection *connection) {
     for (size_t i = 0; i < kings.size(); ++i) {
         kings[i].team = chess::Team(i);
         int row = int(read(1)), col = int(read(1));
-        kings[i].pos = {row, col};
-        claim(kings[i].pos);
+        auto alive = read(1);
+        if (alive > 1) throw std::runtime_error("Invalid king state");
+        kings[i].alive = alive != 0;
+        if (kings[i].alive) {
+            kings[i].pos = {row, col};
+            claim(kings[i].pos);
+        } else {
+            if (row != 255 || col != 255) throw std::runtime_error("Invalid captured king position");
+            kings[i].pos = {-1,-1};
+        }
+    }
+    auto phase = read(1), winner = read(1), capturer = read(4), break_ms = read(2), round = read(4);
+    if (phase > 1 || (winner > 1 && winner != 255) || break_ms > 5000 || round == 0)
+        throw std::runtime_error("Invalid round state");
+    if (phase == uint8_t(chess::RoundPhase::Playing)) {
+        if (winner != 255 || capturer != 0 || break_ms != 0 || !kings[0].alive || !kings[1].alive)
+            throw std::runtime_error("Invalid playing round");
+    } else {
+        if (winner > 1 || break_ms == 0 || !kings[winner].alive || kings[1-winner].alive)
+            throw std::runtime_error("Invalid round result");
+        // The capturer may have disconnected during the break.
+        for (auto const &player : players)
+            if (player.id == capturer && uint8_t(player.team) != winner)
+                throw std::runtime_error("Invalid capturer team");
     }
     if (recipient && !ids.count(recipient)) throw std::runtime_error("Missing local player");
     // Commit only a fully validated frame. Never apply this on the live server.
     logic.players = std::move(players);
     logic.kings = kings;
     local_player_id = recipient;
+    logic.phase = chess::RoundPhase(phase);
+    logic.winner = winner == 255 ? std::nullopt : std::optional<chess::Team>(chess::Team(winner));
+    logic.capturer_id = capturer;
+    logic.break_remaining = float(break_ms) / 1000.0f;
+    logic.round_number = round;
     buffer.erase(buffer.begin(), buffer.begin() + 4 + size);
     return true;
 }

@@ -103,6 +103,9 @@ int main(int argc, char **argv) {
 		//update current game state
 		advance_logic();
 
+		// AI actions run after this tick's player requests.
+        game.logic.update_kings();
+
 		//send updated game state to all clients
 		for (auto &[c, player] : connection_to_player) {
 			game.send_state_message(c, player);

@@ -57,7 +57,7 @@ PlayMode::~PlayMode() {
 
 bool PlayMode::handle_event(SDL_Event const &event, glm::uvec2 const &window_size) {
     if (event.type != SDL_EVENT_MOUSE_BUTTON_DOWN || event.button.button != SDL_BUTTON_LEFT) return false;
-    if (!has_snapshot) return true;
+    if (!has_snapshot || game.logic.phase != chess::RoundPhase::Playing) return true;
     auto local = std::find_if(game.logic.players.begin(), game.logic.players.end(),
         [&](auto const &p) { return p.id == game.local_player_id; });
     if (local == game.logic.players.end() || local->status != chess::PlayerStatus::Alive || local->cooldown > 0) return true;
@@ -102,7 +102,10 @@ void PlayMode::update(float) {
         static char const *names[] = {"Pawn", "Knight", "Bishop", "Rook", "Queen"};
         hud_info = std::string(player.team == chess::Team::A ? "Team A | " : "Team B | ")
                  + names[uint8_t(player.piece)] + " | Points: " + std::to_string(player.points);
-        if (player.status == chess::PlayerStatus::Dead)
+        if (game.logic.phase == chess::RoundPhase::Break)
+            hud_status = std::string(*game.logic.winner == chess::Team::A ? "Team A wins! " : "Team B wins! ")
+                       + "Next round in " + std::to_string(int(std::ceil(game.logic.break_remaining))) + "s";
+        else if (player.status == chess::PlayerStatus::Dead)
             hud_status = "Captured - respawn in " + std::to_string(int(std::ceil(player.respawn_remaining))) + "s";
         else if (player.status == chess::PlayerStatus::Waiting)
             hud_status = "Waiting for a free home square";
@@ -159,14 +162,14 @@ void PlayMode::draw(glm::uvec2 const &drawable_size) {
         }
         glDisable(GL_SCISSOR_TEST);
     };
-    for (auto const &king : game.logic.kings) marker(king.pos, king.team, false);
+    for (auto const &king : game.logic.kings) if (king.alive) marker(king.pos, king.team, false);
     for (auto const &player : game.logic.players)
         if (player.status == chess::PlayerStatus::Alive)
             marker(player.pos, player.team, player.id == game.local_player_id);
 
     // Small bar below the board: green means ready, amber drains with cooldown.
     for (auto const &player : game.logic.players) {
-        if (player.id != game.local_player_id || player.status != chess::PlayerStatus::Alive) continue;
+        if (game.logic.phase != chess::RoundPhase::Playing || player.id != game.local_player_id || player.status != chess::PlayerStatus::Alive) continue;
         int height = std::max(2, cell / 10);
         int y = std::max(0, bottom - height * 2);
         glEnable(GL_SCISSOR_TEST);
@@ -217,7 +220,7 @@ void PlayMode::draw(glm::uvec2 const &drawable_size) {
 		glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STREAM_DRAW);
 		glDrawArrays(GL_TRIANGLES, 0, 6);
     };
-    for (auto const &king : game.logic.kings) draw_piece(chess::Pieces::King, king.pos);
+    for (auto const &king : game.logic.kings) if (king.alive) draw_piece(chess::Pieces::King, king.pos);
     for (auto const &player : game.logic.players)
         if (player.status == chess::PlayerStatus::Alive) draw_piece(player.piece, player.pos);
 	glBindVertexArray(0);
