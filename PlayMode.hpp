@@ -29,6 +29,7 @@ struct PlayMode : Mode {
 
 	//last message from server:
 	std::string server_message;
+    std::string hud_info, hud_status;
 
 	//connection to server:
 	Client &client;

@@ -1,5 +1,7 @@
 #include "PlayMode.hpp"
 #include "BoardLayout.hpp"
+#include "DrawLines.hpp"
+#include <cmath>
 
 #include "ColorTextureProgram.hpp"
 #include "load_save_png.hpp"
@@ -62,7 +64,7 @@ bool PlayMode::handle_event(SDL_Event const &event, glm::uvec2 const &window_siz
     int width, height;
     SDL_GetWindowSizeInPixels(Mode::window, &width, &height);
     auto destination = BoardLayout::hit(event.button.x, event.button.y, window_size.x, window_size.y, width, height);
-    if (destination) Game::send_move_message(&client.connection, *destination);
+    if (destination) Game::send_move_message(&client.connection, *destination, local->life);
     return true;
 }
 
@@ -94,12 +96,20 @@ void PlayMode::update(float) {
 			}
 		}
 	}, 0.0);
-    std::string title = "Chess — connecting";
+    std::string title = "Chess - connecting";
     if (has_snapshot) for (auto const &player : game.logic.players) {
         if (player.id != game.local_player_id) continue;
-        title = "Chess — Player " + std::to_string(player.id)
-              + (player.team == chess::Team::A ? " — Team A (blue)" : " — Team B (orange)")
-              + (player.status == chess::PlayerStatus::Waiting ? " — Waiting for a free home square" : (player.cooldown > 0 ? " — Cooling down" : " — Ready: click a destination"));
+        static char const *names[] = {"Pawn", "Knight", "Bishop", "Rook", "Queen"};
+        hud_info = std::string(player.team == chess::Team::A ? "Team A | " : "Team B | ")
+                 + names[uint8_t(player.piece)] + " | Points: " + std::to_string(player.points);
+        if (player.status == chess::PlayerStatus::Dead)
+            hud_status = "Captured - respawn in " + std::to_string(int(std::ceil(player.respawn_remaining))) + "s";
+        else if (player.status == chess::PlayerStatus::Waiting)
+            hud_status = "Waiting for a free home square";
+        else if (player.cooldown > 0)
+            hud_status = "Cooling down";
+        else hud_status = "Ready - click a destination";
+        title = "Chess - " + hud_info + " - " + hud_status;
     }
     if (title != server_message) {
         SDL_SetWindowTitle(Mode::window, title.c_str());
@@ -216,5 +226,16 @@ void PlayMode::draw(glm::uvec2 const &drawable_size) {
 	glUseProgram(0);
 	glDisable(GL_BLEND);
 	glViewport(0, 0, drawable_size.x, drawable_size.y);
+    // Two short status lines in the margin above the board, using existing vector text.
+    {
+        float w = float(drawable_size.x), h = float(drawable_size.y);
+        float size = std::min({16.0f, w / 44.0f, float(std::max(1, bottom)) / 3.5f});
+        glm::mat4 pixels(1.0f);
+        pixels[0][0] = 2.0f / w; pixels[1][1] = 2.0f / h;
+        pixels[3][0] = -1.0f; pixels[3][1] = -1.0f;
+        DrawLines text(pixels);
+        text.draw_text(hud_info, {float(left), h - size * 1.4f, 0}, {size,0,0}, {0,size,0});
+        text.draw_text(hud_status, {float(left), h - size * 2.8f, 0}, {size,0,0}, {0,size,0});
+    }
 	GL_ERRORS();
 }

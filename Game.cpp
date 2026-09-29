@@ -14,7 +14,7 @@ void Game::send_state_message(Connection *connection, chess::Player const *recip
         for (unsigned i = 0; i < bytes; ++i) connection->send(uint8_t(value >> (8 * i)));
     };
     write(uint8_t(Message::S2C_State), 1);
-    write(10 + 11 * uint32_t(logic.players.size()), 3);
+    write(10 + 21 * uint32_t(logic.players.size()), 3);
     write(recipient ? recipient->id : 0, 4);
     write(uint32_t(logic.players.size()), 2);
     for (auto const &player : logic.players) {
@@ -25,6 +25,9 @@ void Game::send_state_message(Connection *connection, chess::Player const *recip
         write(uint8_t(player.pos.row), 1);
         write(uint8_t(player.pos.col), 1);
         write(uint32_t(std::ceil(player.cooldown * 1000.0f)), 2);
+        write(player.points, 4);
+        write(uint32_t(std::ceil(player.respawn_remaining * 1000.0f)), 2);
+        write(player.life, 4);
     }
     for (auto const &king : logic.kings) {
         write(uint8_t(king.pos.row), 1);
@@ -37,7 +40,7 @@ bool Game::recv_state_message(Connection *connection) {
     if (buffer.size() < 4) return false;
     if (buffer[0] != uint8_t(Message::S2C_State)) return false;
     uint32_t size = uint32_t(buffer[1]) | (uint32_t(buffer[2]) << 8) | (uint32_t(buffer[3]) << 16);
-    if (size < 10 || size > 10 + 11 * uint32_t(std::numeric_limits<uint16_t>::max()) || (size - 10) % 11)
+    if (size < 10 || size > 10 + 21 * uint32_t(std::numeric_limits<uint16_t>::max()) || (size - 10) % 21)
         throw std::runtime_error("Invalid snapshot size");
     if (buffer.size() < 4 + size) return false;
     size_t at = 4;
@@ -49,7 +52,7 @@ bool Game::recv_state_message(Connection *connection) {
     };
     uint32_t recipient = read(4);
     uint32_t count = read(2);
-    if (size != 10 + 11 * count) throw std::runtime_error("Snapshot count/size mismatch");
+    if (size != 10 + 21 * count) throw std::runtime_error("Snapshot count/size mismatch");
     std::list<chess::Player> players;
     std::array<chess::King, 2> kings;
     std::unordered_set<uint32_t> ids;
@@ -66,10 +69,18 @@ bool Game::recv_state_message(Connection *connection) {
         auto team = read(1), piece = read(1), status = read(1);
         auto row = read(1), col = read(1);
         auto cooldown_ms = read(2);
+        player.points = read(4);
+        auto respawn_ms = read(2);
+        player.respawn_remaining = float(respawn_ms) / 1000.0f;
+        player.life = read(4);
         if (cooldown_ms > 1000) throw std::runtime_error("Invalid cooldown");
         player.cooldown = float(cooldown_ms) / 1000.0f;
-        if (!player.id || !ids.insert(player.id).second || team > 1 || piece >= uint8_t(chess::Pieces::King) || status > 1)
+        if (!player.id || !ids.insert(player.id).second || team > 1 || piece >= uint8_t(chess::Pieces::King) || status > 2)
             throw std::runtime_error("Invalid snapshot player");
+        if (respawn_ms > 3000 || (status != uint8_t(chess::PlayerStatus::Dead) && respawn_ms != 0) ||
+            (status == uint8_t(chess::PlayerStatus::Dead) && respawn_ms == 0) ||
+            (status != uint8_t(chess::PlayerStatus::Alive) && cooldown_ms != 0))
+            throw std::runtime_error("Invalid lifecycle timers");
         player.team = chess::Team(team);
         player.piece = chess::Pieces(piece);
         player.status = chess::PlayerStatus(status);
@@ -77,7 +88,7 @@ bool Game::recv_state_message(Connection *connection) {
             player.pos = {int(row), int(col)};
             claim(player.pos);
         } else if (row != 255 || col != 255) {
-            throw std::runtime_error("Invalid waiting position");
+            throw std::runtime_error("Invalid off-board position");
         }
         players.push_back(player);
     }
@@ -96,10 +107,11 @@ bool Game::recv_state_message(Connection *connection) {
     return true;
 }
 
-void Game::send_move_message(Connection *connection, chess::Position destination) {
+void Game::send_move_message(Connection *connection, chess::Position destination, uint32_t life) {
     if (!chess::ChessLogic::in_bounds(destination)) return;
-    for (uint8_t byte : {uint8_t(Message::C2S_Move), uint8_t(2), uint8_t(0), uint8_t(0),
+    for (uint8_t byte : {uint8_t(Message::C2S_Move), uint8_t(6), uint8_t(0), uint8_t(0),
                          uint8_t(destination.row), uint8_t(destination.col)}) connection->send(byte);
+    for (unsigned i = 0; i < 4; ++i) connection->send(uint8_t(life >> (8 * i)));
 }
 
 bool Game::recv_move_message(Connection *connection, uint32_t player_id) {
@@ -107,9 +119,16 @@ bool Game::recv_move_message(Connection *connection, uint32_t player_id) {
     if (buffer.empty()) return false;
     if (buffer[0] != uint8_t(Message::C2S_Move)) throw std::runtime_error("Unknown client message");
     if (buffer.size() < 4) return false;
-    if (buffer[1] != 2 || buffer[2] != 0 || buffer[3] != 0) throw std::runtime_error("Invalid move size");
-    if (buffer.size() < 6) return false;
-    logic.move_player(player_id, {buffer[4], buffer[5]});
-    buffer.erase(buffer.begin(), buffer.begin() + 6);
+    if (buffer[1] != 6 || buffer[2] != 0 || buffer[3] != 0) throw std::runtime_error("Invalid move size");
+    if (buffer.size() < 10) return false;
+    uint32_t life = 0;
+    for (unsigned i = 0; i < 4; ++i) life |= uint32_t(buffer[6 + i]) << (8 * i);
+    for (auto const &player : logic.players) {
+        if (player.id == player_id && player.life == life) {
+            logic.move_player(player_id, {buffer[4], buffer[5]});
+            break;
+        }
+    }
+    buffer.erase(buffer.begin(), buffer.begin() + 10);
     return true; // consumed, even when the move is illegal
 }

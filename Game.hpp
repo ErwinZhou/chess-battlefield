@@ -15,7 +15,7 @@ struct Game {
     void update(float elapsed) { logic.update(elapsed); }
 
     // False means incomplete input or a different message type; no state changes.
-    static void send_move_message(Connection *connection, chess::Position destination);
+    static void send_move_message(Connection *connection, chess::Position destination, uint32_t life);
     bool recv_move_message(Connection *connection, uint32_t player_id);
     bool recv_state_message(Connection *connection);
     void send_state_message(Connection *connection, chess::Player const *recipient = nullptr) const;
