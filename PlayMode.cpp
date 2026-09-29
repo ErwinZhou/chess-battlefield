@@ -104,15 +104,14 @@ void PlayMode::update(float) {
                  + names[uint8_t(player.piece)] + " | Points: " + std::to_string(player.points);
         if (game.logic.phase == chess::RoundPhase::Break)
             hud_status = std::string(*game.logic.winner == chess::Team::A ? "Team A wins! " : "Team B wins! ")
-                       + "Next round in " + std::to_string(int(std::ceil(game.logic.break_remaining))) + "s";
+                       + "Next round in " + std::to_string(int(std::ceil(game.logic.break_remaining)));
         else if (player.status == chess::PlayerStatus::Dead)
-            hud_status = "Captured - respawn in " + std::to_string(int(std::ceil(player.respawn_remaining))) + "s";
+            hud_status = "Captured - respawn in " + std::to_string(int(std::ceil(player.respawn_remaining)));
         else if (player.status == chess::PlayerStatus::Waiting)
             hud_status = "Waiting for a free home square";
-        else if (player.cooldown > 0)
-            hud_status = "Cooling down";
-        else hud_status = "Ready - click a destination";
-        title = "Chess - " + hud_info + " - " + hud_status;
+        else hud_status.clear();
+        title = "Chess - " + hud_info;
+        if (!hud_status.empty()) title += " - " + hud_status;
     }
     if (title != server_message) {
         SDL_SetWindowTitle(Mode::window, title.c_str());
@@ -229,16 +228,41 @@ void PlayMode::draw(glm::uvec2 const &drawable_size) {
 	glUseProgram(0);
 	glDisable(GL_BLEND);
 	glViewport(0, 0, drawable_size.x, drawable_size.y);
-    // Two short status lines in the margin above the board, using existing vector text.
+    // Right-side status panel. Text scales with drawable size, including high DPI.
     {
         float w = float(drawable_size.x), h = float(drawable_size.y);
-        float size = std::min({16.0f, w / 44.0f, float(std::max(1, bottom)) / 3.5f});
+        float size = std::min(float(board.panel_width) / 12.0f, h / 24.0f);
+        float x = float(board.panel_left);
+        float y = float(bottom + side) - size;
         glm::mat4 pixels(1.0f);
         pixels[0][0] = 2.0f / w; pixels[1][1] = 2.0f / h;
         pixels[3][0] = -1.0f; pixels[3][1] = -1.0f;
         DrawLines text(pixels);
-        text.draw_text(hud_info, {float(left), h - size * 1.4f, 0}, {size,0,0}, {0,size,0});
-        text.draw_text(hud_status, {float(left), h - size * 2.8f, 0}, {size,0,0}, {0,size,0});
+        auto line = [&](std::string const &label, float scale = 1.0f,
+                        glm::u8vec4 color = glm::u8vec4(255)) {
+            float font = size * scale;
+            text.draw_text(label, {x,y,0}, {font,0,0}, {0,font,0}, color);
+            y -= font * 1.65f;
+        };
+        for (auto const &player : game.logic.players) {
+            if (player.id != game.local_player_id) continue;
+            static char const *names[] = {"Pawn", "Knight", "Bishop", "Rook", "Queen"};
+            line(player.team == chess::Team::A ? "TEAM A" : "TEAM B", 1.0f,
+                 player.team == chess::Team::A ? glm::u8vec4(100,180,255,255) : glm::u8vec4(255,170,80,255));
+            line(names[uint8_t(player.piece)]);
+            line("Points: " + std::to_string(player.points));
+            y -= size;
+            if (game.logic.phase == chess::RoundPhase::Break) {
+                line(*game.logic.winner == chess::Team::A ? "Team A wins!" : "Team B wins!");
+                line("Next round in " + std::to_string(int(std::ceil(game.logic.break_remaining))));
+            } else if (player.status == chess::PlayerStatus::Dead) {
+                line("Captured");
+                line("Respawn in " + std::to_string(int(std::ceil(player.respawn_remaining))));
+            } else if (player.status == chess::PlayerStatus::Waiting) {
+                line("Waiting for"); line("a free home"); line("square");
+            }
+            break;
+        }
     }
 	GL_ERRORS();
 }

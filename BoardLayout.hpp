@@ -7,9 +7,13 @@
 // Drawing uses drawable pixels; SDL mouse events use window coordinates.
 struct BoardLayout {
     int cell, side, left, bottom;
+    int panel_left, panel_width;
     static BoardLayout fit(int width, int height) {
-        int cell = std::max(1, std::min(width, height) / 10);
-        return {cell, cell * 8, (width - cell * 8) / 2, (height - cell * 8) / 2};
+        // Reserve the right side for readable status; hit testing uses this same rectangle.
+        int board_region = width * 69 / 100;
+        int cell = std::max(1, std::min(width * 65 / 100, height * 86 / 100) / 8);
+        return {cell, cell * 8, (board_region - cell * 8) / 2, (height - cell * 8) / 2,
+                width * 71 / 100, width * 26 / 100};
     }
     static std::optional<chess::Position> hit(float x, float y, int window_w, int window_h,
                                                int drawable_w, int drawable_h) {
